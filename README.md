@@ -1,4 +1,4 @@
-*本项目由AI生成，并同步到仓库
+*本项目由AI生成
 # AllMusicConnect
 
 AllMusic 客户端增强模组（Fabric，客户端侧）：通过 `/music connect <ip> <端口>` 连接第三方独立音乐服务器，无需在服务器上安装 AllMusic 插件即可点歌、听歌。
