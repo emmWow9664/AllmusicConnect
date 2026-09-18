@@ -1,10 +1,11 @@
+*本项目由AI生成
 # AllMusicConnect
 
 AllMusic 客户端增强模组（Fabric，客户端侧）：通过 `/music connect <ip> <端口>` 连接第三方独立音乐服务器，无需在服务器上安装 AllMusic 插件即可点歌、听歌。
 
 ## 功能
 
-- `/music connect <ip> <端口>` —— 连接第三方独立音乐服务器（如 [AllmusicServer](../AllmusicServer)）
+- `/music connect <ip> <端口>` —— 连接第三方独立音乐服务器（如 [AllmusicServer](https://github.com/emmWow9664/AllmusicServer)）
 - `/music disconnect` —— 断开当前连接
 - `/music status` —— 查看连接状态
 - `/music <其它指令>` —— 将指令转发到独立音乐服务器执行（如 `play`、`stop`、`search` 等，带 Tab 补全）
