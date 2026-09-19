@@ -101,6 +101,10 @@ dependencies {
 }
 
 tasks.named<ProcessResources>("processResources") {
+    // mcVersion/version 作为任务输入：切换 -Pmc 构建时必须重新展开 fabric.mod.json，
+    // 否则 Gradle 判定 UP-TO-DATE 复用上一次构建的版本约束（如 1.21.8 产物却写 >=1.21.9）
+    inputs.property("version", project.version)
+    inputs.property("mcVersion", mcVersion)
     filesMatching("fabric.mod.json") {
         expand("version" to project.version, "mcVersion" to mcVersion)
     }
