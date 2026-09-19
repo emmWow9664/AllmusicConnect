@@ -105,9 +105,28 @@ tasks.named<ProcessResources>("processResources") {
         expand("version" to project.version, "mcVersion" to mcVersion)
     }
 }
-tasks.named<Jar>("jar") {
-    archiveFileName.set("AllmusicConnect-${project.version}-mc${mcVersion}.jar")
-    destinationDirectory.set(file("build/libs"))
+if (generation == "modern") {
+    // 26.x 官方命名环境：官方 jar 即官方名，运行时类名与编译名一致，直接发布 jar 产物
+    tasks.named<Jar>("jar") {
+        archiveFileName.set("AllmusicConnect-${project.version}-mc${mcVersion}.jar")
+        destinationDirectory.set(file("build/libs"))
+    }
+} else {
+    // 1.21.x 混淆环境：官方 jar 是混淆名（intermediary），发布产物必须经 remapJar 转换，
+    // 否则运行时找不到官方名类（如 net.minecraft.commands.CommandBuildContext）导致 NoClassDefFoundError 崩溃
+    tasks.named<Jar>("jar") {
+        // 编译期 named jar（官方映射名），仅作为 remapJar 的输入，不作为发布产物
+        archiveFileName.set("AllmusicConnect-${project.version}-mc${mcVersion}-dev.jar")
+        destinationDirectory.set(file("build/libs"))
+    }
+    tasks.named<org.gradle.api.tasks.bundling.AbstractArchiveTask>("remapJar") {
+        // 发布产物：remap 为 intermediary 名（运行时 Fabric 生态标准命名）
+        archiveFileName.set("AllmusicConnect-${project.version}-mc${mcVersion}.jar")
+        destinationDirectory.set(file("build/libs"))
+    }
+    tasks.named("build") {
+        dependsOn("remapJar")
+    }
 }
 tasks.withType<JavaCompile> {
     options.encoding = "UTF-8"

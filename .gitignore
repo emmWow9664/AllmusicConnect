@@ -1,5 +1,6 @@
-﻿.gradle/
+.gradle/
 build/tmp/
+build/libs/*-dev.jar
 **/cookie.json
 **/latest.log
 .idea/
