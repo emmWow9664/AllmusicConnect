@@ -6,3 +6,6 @@ build/libs/*-dev.jar
 .idea/
 *.iml
 
+# IDE 编译输出
+bin/
+
