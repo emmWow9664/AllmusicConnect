@@ -265,16 +265,17 @@ public class TcpBridge {
      * 独立服务端模式是否开启。
      * <p>
      * 关闭后本模组不再拦截 /music 指令（除开关本身），全部交给 MC 服务器上的 AllMusic 插件处理。
+     * 用 Boolean 保存并把 null 视为开启：旧版本配置文件里没有该字段时保持「开启」，行为不变。
      */
     public boolean isStandaloneEnabled() {
-        return prefs.standalone;
+        return !Boolean.FALSE.equals(prefs.standalone);
     }
 
     /**
      * 开启/关闭独立服务端模式；关闭时断开当前连接，让 MC 服务器的 AllMusic 插件接管 /music
      */
     public void setStandalone(boolean enable) {
-        if (prefs.standalone == enable) {
+        if (isStandaloneEnabled() == enable) {
             sendMsg(enable ? "独立服务端模式已经是开启状态" : "独立服务端模式已经是关闭状态");
             return;
         }
@@ -450,7 +451,7 @@ public class TcpBridge {
             if (loaded == null) {
                 return;
             }
-            prefs.standalone = loaded.standalone;
+            prefs.standalone = loaded.standalone == null ? Boolean.TRUE : loaded.standalone;
             prefs.autoConnect = loaded.autoConnect;
             prefs.lastIp = loaded.lastIp == null ? "" : loaded.lastIp;
             prefs.lastPort = loaded.lastPort < 1 || loaded.lastPort > 65535 ? DEFAULT_PORT : loaded.lastPort;
@@ -477,8 +478,9 @@ public class TcpBridge {
      * 客户端配置内容（Gson 序列化）
      */
     private static final class ClientPrefs {
-        /** 独立服务端模式：关闭后不拦截 /music 指令，交给 MC 服务器上的 AllMusic 插件 */
-        private boolean standalone = true;
+        /** 独立服务端模式：关闭后不拦截 /music 指令，交给 MC 服务器上的 AllMusic 插件。
+         *  用包装类型：旧配置文件不含该字段时按 null 处理，视为开启（保持原有行为） */
+        private Boolean standalone = Boolean.TRUE;
         /** 是否在进入服务器时自动连接上次的独立音乐服务器 */
         private boolean autoConnect;
         /** 上次成功连接的地址 */

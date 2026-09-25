@@ -55,6 +55,10 @@ public class AllmusicConnectClient implements ClientModInitializer {
      */
     public static <S> LiteralArgumentBuilder<S> buildMusicTree() {
         return LiteralArgumentBuilder.<S>literal("music")
+                // 独立服务端模式关闭时，让 Fabric 的客户端指令调度器在根节点就解析失败：
+                // brigadier 抛出 dispatcherUnknownCommand（属于 Fabric isIgnoredException 会忽略的类型），
+                // 于是指令不被本地执行、原样发给 MC 服务器，由服务器上的 AllMusic 插件处理。
+                .requires(source -> TcpBridge.INSTANCE.isStandaloneEnabled())
                 // /music standalone [true|false] —— 独立服务端模式总开关
                 .then(standaloneNode())
                 // /music connect <ip> [端口]
