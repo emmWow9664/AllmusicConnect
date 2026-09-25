@@ -57,6 +57,10 @@ public abstract class ClientPacketListenerMixin {
     @Inject(method = "handleCommands", at = @At("RETURN"))
     private void allmusicconnect$mergeMusicCompletions(ClientboundCommandsPacket packet, CallbackInfo ci) {
         try {
+            if (!TcpBridge.INSTANCE.isStandaloneEnabled()) {
+                // 独立服务端模式已关闭：不介入服务器的指令树，Tab 补全完全交给 AllMusic 插件
+                return;
+            }
             // register 内部走 CommandNode#addChild：同名节点会合并子节点，
             // 因此服务器已存在的 /music 节点会获得本模组的子指令
             commands.register(AllmusicConnectClient.buildMusicTree());

@@ -101,6 +101,25 @@ public class TcpBridge {
             return false;
         }
         String sub = parts[1].toLowerCase(Locale.ROOT);
+        // 独立服务端模式开关始终由本模组处理：关闭后玩家仍能靠它重新开启
+        if (sub.equals("standalone")) {
+            if (parts.length >= 3 && parts[2].equalsIgnoreCase("true")) {
+                INSTANCE.setStandalone(true);
+            } else if (parts.length >= 3 && parts[2].equalsIgnoreCase("false")) {
+                INSTANCE.setStandalone(false);
+            } else if (parts.length >= 3) {
+                INSTANCE.sendMsg("用法：/music standalone [true|false]");
+            } else {
+                INSTANCE.sendMsg(INSTANCE.isStandaloneEnabled()
+                        ? "独立服务端模式：已开启（/music standalone false 关闭，关闭后由 MC 服务器上的 AllMusic 插件接管 /music 指令）"
+                        : "独立服务端模式：已关闭（/music standalone true 开启）");
+            }
+            return true;
+        }
+        if (!INSTANCE.isStandaloneEnabled()) {
+            // 独立服务端模式已关闭：本模组完全不介入，指令全部交给 MC 服务器（AllMusic 插件）
+            return false;
+        }
         switch (sub) {
             case "connect" -> {
                 if (parts.length >= 3) {
@@ -233,13 +252,40 @@ public class TcpBridge {
     }
 
     /**
-     * 进入服务器/世界后，若开启了自动连接则连接上次的独立音乐服务器
+     * 进入服务器/世界后，若独立服务端模式与自动连接都已开启，则连接上次的独立音乐服务器
      */
     public void autoConnect() {
-        if (!prefs.autoConnect || prefs.lastIp == null || prefs.lastIp.isEmpty()) {
+        if (!prefs.standalone || !prefs.autoConnect || prefs.lastIp == null || prefs.lastIp.isEmpty()) {
             return;
         }
         connect(prefs.lastIp, prefs.lastPort);
+    }
+
+    /**
+     * 独立服务端模式是否开启。
+     * <p>
+     * 关闭后本模组不再拦截 /music 指令（除开关本身），全部交给 MC 服务器上的 AllMusic 插件处理。
+     */
+    public boolean isStandaloneEnabled() {
+        return prefs.standalone;
+    }
+
+    /**
+     * 开启/关闭独立服务端模式；关闭时断开当前连接，让 MC 服务器的 AllMusic 插件接管 /music
+     */
+    public void setStandalone(boolean enable) {
+        if (prefs.standalone == enable) {
+            sendMsg(enable ? "独立服务端模式已经是开启状态" : "独立服务端模式已经是关闭状态");
+            return;
+        }
+        prefs.standalone = enable;
+        savePrefs();
+        if (enable) {
+            sendMsg("已开启独立服务端模式：/music <指令> 将转发给独立音乐服务器（用 /music connect 连接）");
+        } else {
+            disconnect();
+            sendMsg("已关闭独立服务端模式：已断开独立音乐服务器，/music 指令交由 MC 服务器上的 AllMusic 插件处理（用 /music standalone true 可重新开启）");
+        }
     }
 
     /**
@@ -404,6 +450,7 @@ public class TcpBridge {
             if (loaded == null) {
                 return;
             }
+            prefs.standalone = loaded.standalone;
             prefs.autoConnect = loaded.autoConnect;
             prefs.lastIp = loaded.lastIp == null ? "" : loaded.lastIp;
             prefs.lastPort = loaded.lastPort < 1 || loaded.lastPort > 65535 ? DEFAULT_PORT : loaded.lastPort;
@@ -430,6 +477,8 @@ public class TcpBridge {
      * 客户端配置内容（Gson 序列化）
      */
     private static final class ClientPrefs {
+        /** 独立服务端模式：关闭后不拦截 /music 指令，交给 MC 服务器上的 AllMusic 插件 */
+        private boolean standalone = true;
         /** 是否在进入服务器时自动连接上次的独立音乐服务器 */
         private boolean autoConnect;
         /** 上次成功连接的地址 */

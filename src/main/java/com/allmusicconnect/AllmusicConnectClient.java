@@ -19,6 +19,8 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
  *   <li>/music disconnect —— 断开连接</li>
  *   <li>/music status —— 查看连接状态</li>
  *   <li>/music autoconnect &lt;true|false&gt; —— 开关「进入服务器时自动连接上次的独立音乐服务器」</li>
+ *   <li>/music standalone [true|false] —— 独立服务端模式总开关；关闭后本模组不介入 /music，
+ *       全部交给 MC 服务器上的 AllMusic 插件处理</li>
  *   <li>/music &lt;其它 allmusic 指令&gt; —— 转发到独立音乐服务器执行（如 play、stop、search 等）</li>
  * </ul>
  */
@@ -30,7 +32,7 @@ public class AllmusicConnectClient implements ClientModInitializer {
     private static final String[] FORWARD_COMMANDS = {
             "stop", "help", "list", "vote", "mute", "search",
             "select", "nextpage", "lastpage", "hud", "push", "cancel", "agree",
-            "addlist", "connect", "disconnect", "autoconnect", "status"
+            "addlist", "connect", "disconnect", "autoconnect", "standalone", "status"
     };
 
     @Override
@@ -53,6 +55,8 @@ public class AllmusicConnectClient implements ClientModInitializer {
      */
     public static <S> LiteralArgumentBuilder<S> buildMusicTree() {
         return LiteralArgumentBuilder.<S>literal("music")
+                // /music standalone [true|false] —— 独立服务端模式总开关
+                .then(standaloneNode())
                 // /music connect <ip> [端口]
                 .then(LiteralArgumentBuilder.<S>literal("connect")
                         .then(RequiredArgumentBuilder.<S, String>argument("ip", StringArgumentType.word())
@@ -102,6 +106,23 @@ public class AllmusicConnectClient implements ClientModInitializer {
                         })
                         .executes(ctx -> {
                             TcpBridge.INSTANCE.forwardCommand("/music " + StringArgumentType.getString(ctx, "args"));
+                            return 1;
+                        }));
+    }
+
+    /**
+     * 独立服务端模式开关节点（/music standalone [true|false]）
+     */
+    private static <S> LiteralArgumentBuilder<S> standaloneNode() {
+        return LiteralArgumentBuilder.<S>literal("standalone")
+                .then(LiteralArgumentBuilder.<S>literal("true")
+                        .executes(ctx -> {
+                            TcpBridge.INSTANCE.setStandalone(true);
+                            return 1;
+                        }))
+                .then(LiteralArgumentBuilder.<S>literal("false")
+                        .executes(ctx -> {
+                            TcpBridge.INSTANCE.setStandalone(false);
                             return 1;
                         }));
     }

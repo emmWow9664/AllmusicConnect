@@ -55,7 +55,7 @@ val mcVersion = mcVer.mc
 val generation = mcVer.gen
 
 group = "com.example"
-version = "1.2"
+version = "1.3"
 
 the<JavaPluginExtension>().apply {
     sourceCompatibility = JavaVersion.toVersion(mcVer.java)

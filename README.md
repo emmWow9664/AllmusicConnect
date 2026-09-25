@@ -11,6 +11,7 @@ AllMusic 客户端增强模组（Fabric，客户端侧）：通过 `/music conne
 - `/music disconnect` —— 断开当前连接（连接过程中执行可取消本次连接）
 - `/music status` —— 查看连接状态
 - `/music autoconnect <true|false>` —— 是否在进入服务器时自动连接上次连接的独立音乐服务器（默认关闭，关闭时用 `connect` 手动连接）；开关与上次地址保存在 `config/amc10086.json`
+- `/music standalone [true|false]` —— 独立服务端模式总开关（默认开启；不带参数时显示当前状态）。**关闭后会立即断开独立音乐服务器，且本模组不再拦截 `connect` / `disconnect` / `status` / `autoconnect`，也不介入 Tab 补全**，`/music <指令>` 全部交给所连 MC 服务器上的 AllMusic 插件处理（关闭状态下仍可用 `/music standalone true` 重新开启）
 - `/music <其它指令>` —— 将指令转发到独立音乐服务器执行（如 `play`、`stop`、`search` 等，带 Tab 补全）
 - 指令冲突免疫：即使所连的 MC 服务器装有 AllMusic 服务端插件，上述指令依然可用（见下文「指令冲突处理」）
 - 连接在后台线程建立（5 秒连接超时），不会卡住游戏
@@ -28,11 +29,16 @@ MC 服务器若安装了 AllMusic 服务端插件，服务端的 `/music` 命令
 
 | 输入的指令 | 行为 |
 | --- | --- |
+| `/music standalone [true\|false]` | 本地开关独立服务端模式（关闭后不再拦截下列指令） |
 | `/music connect <ip> [端口]` | 本地连接独立音乐服务器，不发送给 MC 服务器 |
 | `/music disconnect` | 本地断开连接 |
 | `/music status` | 本地显示连接状态 |
 | `/music autoconnect <true\|false>` | 本地开关自动连接 |
 | `/music <其它子指令>` | **已连接**音乐服务器时转发给它；**未连接**时放行给 MC 服务器（保留服务端 AllMusic 插件的原有行为） |
+
+**关闭独立服务端模式后**（`/music standalone false`）：本模组只保留 `/music standalone` 一个拦截点，
+`connect` / `disconnect` / `status` / `autoconnect` 与其它子指令全部原样发给 MC 服务器（由 AllMusic 插件处理），
+同时不再向服务器的指令树注入本模组的 Tab 补全项——即完全回到「没装这个模组」的体验。
 
 相关实现：`src/main/java/com/allmusicconnect/mixin/ClientPacketListenerMixin.java`、
 配置 `src/main/resources/amc10086.mixins.json`（在 `fabric.mod.json` 的 `mixins` 中注册）。
