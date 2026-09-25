@@ -1,35 +1,43 @@
 *本项目由AI生成
 # AllMusicConnect
 
-AllMusic 客户端增强模组（Fabric，客户端侧）：通过 `/music connect <ip> <端口>` 连接第三方独立音乐服务器，无需在服务器上安装 AllMusic 插件即可点歌、听歌。
+项目仓库：<https://github.com/emmWow9664/AllmusicConnect>
+
+AllMusic 客户端增强模组（Fabric，客户端侧）：通过 `/music connect <ip> [端口]` 连接第三方独立音乐服务器，无需在服务器上安装 AllMusic 插件即可点歌、听歌。
 
 ## 功能
 
-- `/music connect <ip> <端口>` —— 连接第三方独立音乐服务器（如 [AllmusicStandaloneServer](https://github.com/emmWow9664/AllmusicStandaloneServer)）
-- `/music disconnect` —— 断开当前连接
+- `/music connect <ip> [端口]` —— 连接第三方独立音乐服务器（如 [AllmusicStandaloneServer](https://github.com/emmWow9664/AllmusicStandaloneServer)）；端口省略时使用默认端口 `5223`
+- `/music disconnect` —— 断开当前连接（连接过程中执行可取消本次连接）
 - `/music status` —— 查看连接状态
+- `/music autoconnect <true|false>` —— 是否在进入服务器时自动连接上次连接的独立音乐服务器（默认关闭，关闭时用 `connect` 手动连接）；开关与上次地址保存在 `config/amc10086.json`
 - `/music <其它指令>` —— 将指令转发到独立音乐服务器执行（如 `play`、`stop`、`search` 等，带 Tab 补全）
 - 指令冲突免疫：即使所连的 MC 服务器装有 AllMusic 服务端插件，上述指令依然可用（见下文「指令冲突处理」）
+- 连接在后台线程建立（5 秒连接超时），不会卡住游戏
 - 退出服务器 / 退出游戏时自动断开连接
 
 ## 指令冲突处理
 
 MC 服务器若安装了 AllMusic 服务端插件，服务端的 `/music` 命令树会覆盖客户端注册的同名指令：Tab 补全里
-看不到本模组的 `connect`，手动输入 `/music connect <ip> <端口>` 会被发往服务器并被插件拒绝
+看不到本模组的 `connect`，手动输入 `/music connect <ip> [端口]` 会被发往服务器并被插件拒绝
 （提示「你没有权限执行这个操作」）。
 
-为此模组通过 mixin 拦截 `ClientPacketListener#sendCommand`，在指令真正发往 MC 服务器之前本地处理：
+为此模组通过 mixin 拦截 `ClientPacketListener#sendCommand`，在指令真正发往 MC 服务器之前本地处理；
+并在服务端指令树到达时（`ClientPacketListener#handleCommands`）把本模组的 `/music` 子指令注册进
+同一个指令调度器（brigadier 的同名节点合并），使 Tab 补全能显示本模组的子指令：
 
 | 输入的指令 | 行为 |
 | --- | --- |
-| `/music connect <ip> <端口>` | 本地连接独立音乐服务器，不发送给 MC 服务器 |
+| `/music connect <ip> [端口]` | 本地连接独立音乐服务器，不发送给 MC 服务器 |
 | `/music disconnect` | 本地断开连接 |
 | `/music status` | 本地显示连接状态 |
+| `/music autoconnect <true\|false>` | 本地开关自动连接 |
 | `/music <其它子指令>` | **已连接**音乐服务器时转发给它；**未连接**时放行给 MC 服务器（保留服务端 AllMusic 插件的原有行为） |
 
 相关实现：`src/main/java/com/allmusicconnect/mixin/ClientPacketListenerMixin.java`、
 配置 `src/main/resources/amc10086.mixins.json`（在 `fabric.mod.json` 的 `mixins` 中注册）。
-该注入点在 1.21 ~ 26.2 全部受支持版本上签名一致（`sendCommand(String)`），无需按版本分支。
+上述两个注入点（`sendCommand(String)`、`handleCommands(ClientboundCommandsPacket)`）在
+1.21 ~ 26.2 全部受支持版本上签名一致，无需按版本分支。
 
 ## 依赖
 

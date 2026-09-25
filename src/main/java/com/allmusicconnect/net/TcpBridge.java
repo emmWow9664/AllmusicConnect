@@ -4,9 +4,11 @@ import com.coloryr.allmusic.client.core.AllMusicCore;
 import com.coloryr.allmusic.codec.MusicPack;
 import com.coloryr.allmusic.codec.MusicPacketCodec;
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
@@ -18,6 +20,9 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Locale;
 
 /**
  * 与独立音乐服务端（AllmusicServer）的 TCP 桥接
@@ -36,16 +41,30 @@ import java.nio.charset.StandardCharsets;
 public class TcpBridge {
     public static final TcpBridge INSTANCE = new TcpBridge();
 
+    /**
+     * 独立音乐服务端默认端口（/music connect 省略端口时使用）
+     */
+    public static final int DEFAULT_PORT = 5223;
+
     private static final Gson GSON = new Gson();
+    private static final Gson GSON_PRETTY = new GsonBuilder().setPrettyPrinting().create();
 
     private Socket socket;
     private DataInputStream in;
     private DataOutputStream out;
     private final Object writeLock = new Object();
     private volatile boolean connected;
+    /** 是否正在后台建立连接 */
+    private volatile boolean connecting;
     private volatile String target;
 
+    /**
+     * 客户端配置：自动连接开关 + 上次连接的地址（保存在 config/amc10086.json）
+     */
+    private final ClientPrefs prefs = new ClientPrefs();
+
     private TcpBridge() {
+        loadPrefs();
     }
 
     public boolean isConnected() {
@@ -81,24 +100,26 @@ public class TcpBridge {
             // 只有 "/music"，交给原有逻辑
             return false;
         }
-        String sub = parts[1].toLowerCase(java.util.Locale.ROOT);
+        String sub = parts[1].toLowerCase(Locale.ROOT);
         switch (sub) {
             case "connect" -> {
-                if (parts.length >= 4) {
-                    int port;
-                    try {
-                        port = Integer.parseInt(parts[3]);
-                    } catch (NumberFormatException e) {
-                        INSTANCE.sendMsg("端口号无效：" + parts[3]);
-                        return true;
-                    }
-                    if (port < 1 || port > 65535) {
-                        INSTANCE.sendMsg("端口号超出范围：" + port);
-                        return true;
+                if (parts.length >= 3) {
+                    int port = DEFAULT_PORT;
+                    if (parts.length >= 4) {
+                        try {
+                            port = Integer.parseInt(parts[3]);
+                        } catch (NumberFormatException e) {
+                            INSTANCE.sendMsg("端口号无效：" + parts[3]);
+                            return true;
+                        }
+                        if (port < 1 || port > 65535) {
+                            INSTANCE.sendMsg("端口号超出范围：" + port);
+                            return true;
+                        }
                     }
                     INSTANCE.connect(parts[2], port);
                 } else {
-                    INSTANCE.sendMsg("用法：/music connect <ip> <端口>");
+                    INSTANCE.sendMsg("用法：/music connect <ip> [端口]（端口默认 " + DEFAULT_PORT + "）");
                 }
                 return true;
             }
@@ -108,6 +129,16 @@ public class TcpBridge {
             }
             case "status" -> {
                 INSTANCE.printStatus();
+                return true;
+            }
+            case "autoconnect" -> {
+                if (parts.length >= 3 && parts[2].equalsIgnoreCase("true")) {
+                    INSTANCE.setAutoConnect(true);
+                } else if (parts.length >= 3 && parts[2].equalsIgnoreCase("false")) {
+                    INSTANCE.setAutoConnect(false);
+                } else {
+                    INSTANCE.sendMsg("用法：/music autoconnect <true|false>");
+                }
                 return true;
             }
             default -> {
@@ -122,16 +153,35 @@ public class TcpBridge {
     }
 
     /**
-     * 连接独立音乐服务端并完成握手
+     * 连接独立音乐服务端并完成握手。
+     * <p>
+     * 建立连接（含 5 秒超时）在后台线程执行，避免阻塞渲染线程导致游戏卡顿。
      */
-    public synchronized void connect(String ip, int port) {
+    public void connect(String ip, int port) {
         if (connected) {
             sendMsg("已连接到音乐服务器：" + target);
             return;
         }
+        if (connecting) {
+            sendMsg("正在连接音乐服务器，请稍候（可用 /music disconnect 取消）");
+            return;
+        }
+        connecting = true;
+        sendMsg("正在连接音乐服务器 " + ip + ":" + port + " ...");
+        Thread thread = new Thread(() -> doConnect(ip, port), "allmusic-connect-" + ip + ":" + port);
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private synchronized void doConnect(String ip, int port) {
         try {
             Socket s = new Socket();
             s.connect(new InetSocketAddress(ip, port), 5000);
+            if (!connecting) {
+                // 连接过程中被 /music disconnect 取消
+                s.close();
+                return;
+            }
             s.setTcpNoDelay(true);
             socket = s;
             in = new DataInputStream(s.getInputStream());
@@ -139,13 +189,18 @@ public class TcpBridge {
             connected = true;
             target = ip + ":" + port;
 
+            // 记下这次成功连接，供 /music autoconnect 下次自动连接
+            prefs.lastIp = ip;
+            prefs.lastPort = port;
+            savePrefs();
+
             String playerName = Compat.getPlayerName();
             JsonObject handshake = new JsonObject();
             handshake.addProperty("type", "handshake");
             handshake.addProperty("name", playerName);
             sendJson(GSON.toJson(handshake));
 
-            Thread thread = new Thread(this::readLoop, "allmusic-connect");
+            Thread thread = new Thread(this::readLoop, "allmusic-connect-read");
             thread.setDaemon(true);
             thread.start();
 
@@ -154,6 +209,8 @@ public class TcpBridge {
             connected = false;
             closeSocket();
             sendMsg("连接音乐服务器失败：" + e.getMessage());
+        } finally {
+            connecting = false;
         }
     }
 
@@ -161,6 +218,12 @@ public class TcpBridge {
      * 断开连接
      */
     public synchronized void disconnect() {
+        if (connecting) {
+            // 取消正在进行的连接
+            connecting = false;
+            sendMsg("已取消连接音乐服务器");
+            return;
+        }
         if (!connected) {
             return;
         }
@@ -170,13 +233,43 @@ public class TcpBridge {
     }
 
     /**
+     * 进入服务器/世界后，若开启了自动连接则连接上次的独立音乐服务器
+     */
+    public void autoConnect() {
+        if (!prefs.autoConnect || prefs.lastIp == null || prefs.lastIp.isEmpty()) {
+            return;
+        }
+        connect(prefs.lastIp, prefs.lastPort);
+    }
+
+    /**
+     * 开启/关闭自动连接
+     */
+    public void setAutoConnect(boolean enable) {
+        prefs.autoConnect = enable;
+        savePrefs();
+        if (enable) {
+            if (prefs.lastIp == null || prefs.lastIp.isEmpty()) {
+                sendMsg("已开启自动连接：还没有可用的上次地址，请先用 /music connect 连接一次");
+            } else {
+                sendMsg("已开启自动连接：进入服务器后将自动连接 " + prefs.lastIp + ":" + prefs.lastPort);
+            }
+        } else {
+            sendMsg("已关闭自动连接：请使用 /music connect <ip> [端口] 手动连接");
+        }
+    }
+
+    /**
      * 打印当前连接状态
      */
     public void printStatus() {
+        String usage = "使用 /music connect <ip> [端口] 连接（端口默认 " + DEFAULT_PORT + "）";
         if (connected) {
             sendMsg("已连接到音乐服务器：" + target);
+        } else if (connecting) {
+            sendMsg("正在连接音乐服务器 ...");
         } else {
-            sendMsg("未连接到音乐服务器，使用 /music connect <ip> <端口> 连接");
+            sendMsg("未连接到音乐服务器，" + usage);
         }
     }
 
@@ -185,7 +278,7 @@ public class TcpBridge {
      */
     public void forwardCommand(String command) {
         if (!connected) {
-            sendMsg("未连接到音乐服务器，使用 /music connect <ip> <端口> 连接");
+            sendMsg("未连接到音乐服务器，使用 /music connect <ip> [端口] 连接");
             return;
         }
         JsonObject obj = new JsonObject();
@@ -299,5 +392,48 @@ public class TcpBridge {
             Compat.showSystemMessage(
                     Component.literal("[AllmusicConnect] " + text).withStyle(ChatFormatting.AQUA));
         });
+    }
+
+    private void loadPrefs() {
+        try {
+            Path file = prefsFile();
+            if (!Files.exists(file)) {
+                return;
+            }
+            ClientPrefs loaded = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8), ClientPrefs.class);
+            if (loaded == null) {
+                return;
+            }
+            prefs.autoConnect = loaded.autoConnect;
+            prefs.lastIp = loaded.lastIp == null ? "" : loaded.lastIp;
+            prefs.lastPort = loaded.lastPort < 1 || loaded.lastPort > 65535 ? DEFAULT_PORT : loaded.lastPort;
+        } catch (Exception e) {
+            System.out.println("[AllmusicConnect] 读取配置失败：" + e);
+        }
+    }
+
+    private void savePrefs() {
+        try {
+            Path file = prefsFile();
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, GSON_PRETTY.toJson(prefs), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            System.out.println("[AllmusicConnect] 保存配置失败：" + e);
+        }
+    }
+
+    private Path prefsFile() {
+        return FabricLoader.getInstance().getConfigDir().resolve("amc10086.json");
+    }
+
+    /**
+     * 客户端配置内容（Gson 序列化）
+     */
+    private static final class ClientPrefs {
+        /** 是否在进入服务器时自动连接上次的独立音乐服务器 */
+        private boolean autoConnect;
+        /** 上次成功连接的地址 */
+        private String lastIp = "";
+        private int lastPort = DEFAULT_PORT;
     }
 }
