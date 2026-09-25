@@ -53,6 +53,75 @@ public class TcpBridge {
     }
 
     /**
+     * 在客户端本地处理本模组拥有的 /music 子指令。
+     * <p>
+     * 由 {@code ClientPacketListenerMixin} 在客户端即将把指令发给 MC 服务器时调用：
+     * 当所连的 MC 服务器装有 AllMusic 服务端插件时，服务端的 /music 命令树会覆盖客户端注册的同名指令，
+     * 导致 /music connect ... 被发往服务器并被拒绝（"你没有权限执行这个操作"）。
+     *
+     * @param rawCommand 玩家输入的指令（可能带前导 '/'，由调用方保证非空）
+     * @return true 表示已在本地处理，不应再发送给 MC 服务器
+     */
+    public static boolean handleLocal(String rawCommand) {
+        if (rawCommand == null) {
+            return false;
+        }
+        String command = rawCommand.trim();
+        if (command.startsWith("/")) {
+            command = command.substring(1).trim();
+        }
+        if (command.isEmpty()) {
+            return false;
+        }
+        String[] parts = command.split("\\s+");
+        if (!parts[0].equalsIgnoreCase("music")) {
+            return false;
+        }
+        if (parts.length < 2) {
+            // 只有 "/music"，交给原有逻辑
+            return false;
+        }
+        String sub = parts[1].toLowerCase(java.util.Locale.ROOT);
+        switch (sub) {
+            case "connect" -> {
+                if (parts.length >= 4) {
+                    int port;
+                    try {
+                        port = Integer.parseInt(parts[3]);
+                    } catch (NumberFormatException e) {
+                        INSTANCE.sendMsg("端口号无效：" + parts[3]);
+                        return true;
+                    }
+                    if (port < 1 || port > 65535) {
+                        INSTANCE.sendMsg("端口号超出范围：" + port);
+                        return true;
+                    }
+                    INSTANCE.connect(parts[2], port);
+                } else {
+                    INSTANCE.sendMsg("用法：/music connect <ip> <端口>");
+                }
+                return true;
+            }
+            case "disconnect" -> {
+                INSTANCE.disconnect();
+                return true;
+            }
+            case "status" -> {
+                INSTANCE.printStatus();
+                return true;
+            }
+            default -> {
+                // 其它子指令：已连接音乐服务器时由其处理；否则放行，交给 MC 服务器（可能是服务端 AllMusic 插件）
+                if (INSTANCE.isConnected()) {
+                    INSTANCE.forwardCommand("/music " + command.substring(parts[0].length()).trim());
+                    return true;
+                }
+                return false;
+            }
+        }
+    }
+
+    /**
      * 连接独立音乐服务端并完成握手
      */
     public synchronized void connect(String ip, int port) {

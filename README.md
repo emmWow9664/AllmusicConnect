@@ -9,7 +9,27 @@ AllMusic 客户端增强模组（Fabric，客户端侧）：通过 `/music conne
 - `/music disconnect` —— 断开当前连接
 - `/music status` —— 查看连接状态
 - `/music <其它指令>` —— 将指令转发到独立音乐服务器执行（如 `play`、`stop`、`search` 等，带 Tab 补全）
+- 指令冲突免疫：即使所连的 MC 服务器装有 AllMusic 服务端插件，上述指令依然可用（见下文「指令冲突处理」）
 - 退出服务器 / 退出游戏时自动断开连接
+
+## 指令冲突处理
+
+MC 服务器若安装了 AllMusic 服务端插件，服务端的 `/music` 命令树会覆盖客户端注册的同名指令：Tab 补全里
+看不到本模组的 `connect`，手动输入 `/music connect <ip> <端口>` 会被发往服务器并被插件拒绝
+（提示「你没有权限执行这个操作」）。
+
+为此模组通过 mixin 拦截 `ClientPacketListener#sendCommand`，在指令真正发往 MC 服务器之前本地处理：
+
+| 输入的指令 | 行为 |
+| --- | --- |
+| `/music connect <ip> <端口>` | 本地连接独立音乐服务器，不发送给 MC 服务器 |
+| `/music disconnect` | 本地断开连接 |
+| `/music status` | 本地显示连接状态 |
+| `/music <其它子指令>` | **已连接**音乐服务器时转发给它；**未连接**时放行给 MC 服务器（保留服务端 AllMusic 插件的原有行为） |
+
+相关实现：`src/main/java/com/allmusicconnect/mixin/ClientPacketListenerMixin.java`、
+配置 `src/main/resources/amc10086.mixins.json`（在 `fabric.mod.json` 的 `mixins` 中注册）。
+该注入点在 1.21 ~ 26.2 全部受支持版本上签名一致（`sendCommand(String)`），无需按版本分支。
 
 ## 依赖
 
