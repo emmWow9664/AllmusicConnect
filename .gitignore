@@ -1,6 +1,7 @@
 .gradle/
 build/tmp/
 build/libs/*-dev.jar
+build/devlibs/
 **/cookie.json
 **/latest.log
 .idea/
