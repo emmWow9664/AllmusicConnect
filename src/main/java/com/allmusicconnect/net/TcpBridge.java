@@ -1,13 +1,8 @@
 package com.allmusicconnect.net;
 
-import com.coloryr.allmusic.client.core.AllMusicCore;
-import com.coloryr.allmusic.codec.MusicPack;
-import com.coloryr.allmusic.codec.MusicPacketCodec;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -39,8 +34,6 @@ import java.util.Locale;
  * </ul>
  */
 public class TcpBridge {
-    public static final TcpBridge INSTANCE = new TcpBridge();
-
     /**
      * 独立音乐服务端默认端口（/music connect 省略端口时使用）
      */
@@ -48,6 +41,9 @@ public class TcpBridge {
 
     private static final Gson GSON = new Gson();
     private static final Gson GSON_PRETTY = new GsonBuilder().setPrettyPrinting().create();
+
+    /** 必须放在 GSON / GSON_PRETTY 之后：构造函数里会读配置文件，用到这两个字段 */
+    public static final TcpBridge INSTANCE = new TcpBridge();
 
     private Socket socket;
     private DataInputStream in;
@@ -116,9 +112,43 @@ public class TcpBridge {
             }
             return true;
         }
+        // AllMusic 客户端版本兼容开关：同样始终本地处理（与独立服务端模式无关）
+        if (sub.equals("compat")) {
+            if (parts.length >= 3 && parts[2].equalsIgnoreCase("true")) {
+                INSTANCE.setClientCompat(Boolean.TRUE);
+            } else if (parts.length >= 3 && parts[2].equalsIgnoreCase("false")) {
+                INSTANCE.setClientCompat(Boolean.FALSE);
+            } else if (parts.length >= 3 && parts[2].equalsIgnoreCase("auto")) {
+                INSTANCE.setClientCompat(null);
+            } else if (parts.length >= 3) {
+                INSTANCE.sendMsg("用法：/music compat [true|false|auto]");
+            } else {
+                INSTANCE.printCompat();
+            }
+            return true;
+        }
         if (!INSTANCE.isStandaloneEnabled()) {
-            // 独立服务端模式已关闭：本模组完全不介入，指令全部交给 MC 服务器（AllMusic 插件）
-            return false;
+            // 关闭状态下：本模组自身的控制指令仍由本地处理——MC 服务器上的 AllMusic 插件没有这些指令，
+            // 交给它只会被当成点歌/搜索。其中 connect 会顺带重新开启独立服务端模式，方便随时回到独立服务端。
+            switch (sub) {
+                case "connect" -> INSTANCE.setStandalone(true);
+                case "disconnect" -> {
+                    INSTANCE.sendMsg("独立服务端模式已关闭：当前没有连接");
+                    return true;
+                }
+                case "status" -> {
+                    INSTANCE.sendMsg("独立服务端模式已关闭（用 /music standalone true 开启）：未连接到音乐服务器");
+                    return true;
+                }
+                case "autoconnect" -> {
+                    INSTANCE.sendMsg("独立服务端模式已关闭：自动连接不会生效，请先 /music standalone true");
+                    return true;
+                }
+                default -> {
+                    // 其余指令（play / stop / search / list 等）完全交给 MC 服务器（AllMusic 插件）
+                    return false;
+                }
+            }
         }
         switch (sub) {
             case "connect" -> {
@@ -307,6 +337,38 @@ public class TcpBridge {
     }
 
     /**
+     * 开启/关闭 AllMusic 客户端 3.x（老版）兼容通道。
+     * <p>
+     * 3.x（如 1.21.4 上的 AllMusic_Client-3.1.6）没有 codec 包、类型表与 HUD 数据结构都与 4.x 不同，
+     * 由本模组把数据包翻译成 3.x 格式再交给它。
+     *
+     * @param enable true = 强制开启，false = 强制关闭，null = 自动（按检测到的客户端版本决定）
+     */
+    public void setClientCompat(Boolean enable) {
+        prefs.client3xCompat = enable;
+        savePrefs();
+        PackRouter.setCompatOverride(enable);
+        if (enable == null) {
+            sendMsg("3.x 客户端兼容通道：已改为自动（检测到 3.x 客户端时自动开启，4.x 客户端不受影响）");
+        } else if (enable) {
+            sendMsg("已强制开启 3.x 客户端兼容通道：老版 AllMusic 客户端（3.1.6 等）可播放音乐与歌词；"
+                    + "逐字歌词、播放时间同步、m4a 格式歌曲仍不可用，建议升级到 4.x 客户端");
+        } else {
+            sendMsg("已强制关闭 3.x 客户端兼容通道：3.x 客户端将不再收到音乐数据包（/music compat auto 恢复自动）");
+        }
+    }
+
+    /** 打印 3.x 兼容通道状态 */
+    public void printCompat() {
+        String state = PackRouter.isCompatAuto()
+                ? "自动（检测到 3.x 客户端时自动开启）"
+                : (PackRouter.isCompatEnabled() ? "已强制开启" : "已强制关闭");
+        sendMsg("3.x 客户端兼容通道：" + state
+                + "；当前生效=" + (PackRouter.isCompatEnabled() ? "开" : "关")
+                + "（/music compat [true|false|auto] 修改）");
+    }
+
+    /**
      * 打印当前连接状态
      */
     public void printStatus() {
@@ -370,10 +432,8 @@ public class TcpBridge {
     private void handleFrame(int kind, byte[] data) {
         try {
             if (kind == 1) {
-                // MusicPack：交给 AllMusic 客户端核心处理（播放、歌词、封面等）
-                ByteBuf buf = Unpooled.wrappedBuffer(data);
-                MusicPack pack = MusicPacketCodec.decode(buf);
-                Minecraft.getInstance().execute(() -> AllMusicCore.packDo(pack));
+                // MusicPack：按运行时安装的 AllMusic 客户端世代（3.x / 4.x）分发处理
+                PackRouter.dispatch(data);
             } else if (kind == 2) {
                 String json = new String(data, StandardCharsets.UTF_8);
                 JsonObject obj = GSON.fromJson(json, JsonObject.class);
@@ -393,8 +453,10 @@ public class TcpBridge {
                     Minecraft.getInstance().execute(() -> Compat.showSystemMessage(component));
                 }
             }
-        } catch (Exception e) {
-            System.out.println("[AllmusicConnect] 数据包处理出错：" + e);
+        } catch (Throwable t) {
+            // 单个数据包处理失败（包括 NoClassDefFoundError 等 Error）绝不能断开与音乐服务器的连接
+            System.out.println("[AllmusicConnect] 数据包处理出错（kind=" + kind + "）：" + t);
+            t.printStackTrace();
         }
     }
 
@@ -455,9 +517,11 @@ public class TcpBridge {
             prefs.autoConnect = loaded.autoConnect;
             prefs.lastIp = loaded.lastIp == null ? "" : loaded.lastIp;
             prefs.lastPort = loaded.lastPort < 1 || loaded.lastPort > 65535 ? DEFAULT_PORT : loaded.lastPort;
+            prefs.client3xCompat = loaded.client3xCompat;
         } catch (Exception e) {
             System.out.println("[AllmusicConnect] 读取配置失败：" + e);
         }
+        PackRouter.setCompatOverride(prefs.client3xCompat);
     }
 
     private void savePrefs() {
@@ -486,5 +550,8 @@ public class TcpBridge {
         /** 上次成功连接的地址 */
         private String lastIp = "";
         private int lastPort = DEFAULT_PORT;
+        /** 3.x 客户端兼容通道：null = 自动（检测到 3.x 客户端自动开启），true/false = 强制开关。
+         *  3.x 的类型表与 HUD 数据结构都与 4.x 不同，由模组翻译后转发 */
+        private Boolean client3xCompat;
     }
 }

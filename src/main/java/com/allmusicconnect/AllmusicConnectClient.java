@@ -32,7 +32,7 @@ public class AllmusicConnectClient implements ClientModInitializer {
     private static final String[] FORWARD_COMMANDS = {
             "stop", "help", "list", "vote", "mute", "search",
             "select", "nextpage", "lastpage", "hud", "push", "cancel", "agree",
-            "addlist", "connect", "disconnect", "autoconnect", "standalone", "status"
+            "addlist", "connect", "disconnect", "autoconnect", "standalone", "compat", "status"
     };
 
     @Override
@@ -97,6 +97,27 @@ public class AllmusicConnectClient implements ClientModInitializer {
                         .then(LiteralArgumentBuilder.<S>literal("false")
                                 .executes(ctx -> {
                                     TcpBridge.INSTANCE.setAutoConnect(false);
+                                    return 1;
+                                })))
+                // /music compat [true|false] —— AllMusic 客户端 3.x（老版）兼容通道开关
+                .then(LiteralArgumentBuilder.<S>literal("compat")
+                        .executes(ctx -> {
+                            TcpBridge.INSTANCE.printCompat();
+                            return 1;
+                        })
+                        .then(LiteralArgumentBuilder.<S>literal("true")
+                                .executes(ctx -> {
+                                    TcpBridge.INSTANCE.setClientCompat(true);
+                                    return 1;
+                                }))
+                        .then(LiteralArgumentBuilder.<S>literal("false")
+                                .executes(ctx -> {
+                                    TcpBridge.INSTANCE.setClientCompat(Boolean.FALSE);
+                                    return 1;
+                                }))
+                        .then(LiteralArgumentBuilder.<S>literal("auto")
+                                .executes(ctx -> {
+                                    TcpBridge.INSTANCE.setClientCompat(null);
                                     return 1;
                                 })))
                 // /music <其它指令> —— 转发到独立服务端（带 tab 补全）

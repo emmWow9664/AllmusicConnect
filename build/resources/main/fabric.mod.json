@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "amc10086",
-  "version": "1.3",
+  "version": "1.15",
   "name": "AllMusicConnect",
   "description": "AllMusic 客户端增强模组：通过 /music connect <ip> [端口] 连接第三方独立音乐服务器，无需服务器安装 AllMusic 插件即可点歌、听歌",
   "authors": [
