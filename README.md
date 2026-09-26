@@ -1,6 +1,8 @@
 *本项目由AI生成
 # AllMusicConnect
 
+![AllmusicConnect](docs/header.svg)
+
 项目仓库：<https://github.com/emmWow9664/AllmusicConnect>
 
 AllMusic 客户端增强模组（Fabric，客户端侧）：通过 `/musicconnect connect <ip> [端口]` 连接第三方独立音乐服务器，无需在服务器上安装 AllMusic 插件即可点歌、听歌。
