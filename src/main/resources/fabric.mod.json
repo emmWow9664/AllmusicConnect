@@ -22,7 +22,7 @@
   ],
   "depends": {
     "fabricloader": ">=0.19.3",
-    "minecraft": ">=${mcVersion}",
+    "minecraft": "${mcRange}",
     "fabric-api": "*",
     "allmusic_client": "*"
   }

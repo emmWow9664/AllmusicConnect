@@ -2,6 +2,12 @@
 build/tmp/
 build/libs/*-dev.jar
 build/devlibs/
+# 编译中间产物（可由构建重新生成）
+build/classes/
+build/resources/
+# 可发布产物通过 GitHub Releases 分发，不入库
+build/libs/*.jar
+build/libs/*.zip
 **/cookie.json
 **/latest.log
 .idea/

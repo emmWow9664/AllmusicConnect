@@ -1,4 +1,4 @@
-﻿import org.gradle.api.plugins.JavaPluginExtension
+import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.compile.JavaCompile
@@ -54,8 +54,21 @@ val mcVer = mcMap[target] ?: error("未知目标版本: $target，可选: ${mcMa
 val mcVersion = mcVer.mc
 val generation = mcVer.gen
 
+// 精准 MC 版本区间：取有序 mcMap 中当前 key 的下一个版本的 mc 号作为上界（最后一个 26.2 用 26.3）。
+// 只声明下限（>=mcVersion）会让错误的 jar（如把 1.21.4 的 jar 装进 26.2）被 Fabric 照常加载，
+// 进游戏后在 onInitializeClient 因中间类名不存在而 NoClassDefFoundError 崩溃；
+// 收紧为 [下限, 上界) 后装错版本时 Fabric 直接拒绝加载并给出清晰提示。
+val mcKeys = mcMap.keys.toList()
+val targetIndex = mcKeys.indexOf(target)
+val nextMcVersion = if (targetIndex >= 0 && targetIndex < mcKeys.size - 1) {
+    mcMap[mcKeys[targetIndex + 1]]!!.mc
+} else {
+    "26.3"
+}
+val mcRange = ">=${mcVersion} <${nextMcVersion}"
+
 group = "com.example"
-version = "1.15"
+version = "1.17"
 
 the<JavaPluginExtension>().apply {
     sourceCompatibility = JavaVersion.toVersion(mcVer.java)
@@ -101,12 +114,13 @@ dependencies {
 }
 
 tasks.named<ProcessResources>("processResources") {
-    // mcVersion/version 作为任务输入：切换 -Pmc 构建时必须重新展开 fabric.mod.json，
+    // mcRange/mcVersion/version 作为任务输入：切换 -Pmc 构建时必须重新展开 fabric.mod.json，
     // 否则 Gradle 判定 UP-TO-DATE 复用上一次构建的版本约束（如 1.21.8 产物却写 >=1.21.9）
     inputs.property("version", project.version)
     inputs.property("mcVersion", mcVersion)
+    inputs.property("mcRange", mcRange)
     filesMatching("fabric.mod.json") {
-        expand("version" to project.version, "mcVersion" to mcVersion)
+        expand("version" to project.version, "mcVersion" to mcVersion, "mcRange" to mcRange)
     }
 }
 if (generation == "modern") {

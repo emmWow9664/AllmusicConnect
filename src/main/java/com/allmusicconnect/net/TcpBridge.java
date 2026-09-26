@@ -68,16 +68,20 @@ public class TcpBridge {
     }
 
     /**
-     * 在客户端本地处理本模组拥有的 /music 子指令。
+     * 转发兜底：由 {@code ClientPacketListenerMixin} 在指令即将发往 MC 服务器前调用。
      * <p>
-     * 由 {@code ClientPacketListenerMixin} 在客户端即将把指令发给 MC 服务器时调用：
-     * 当所连的 MC 服务器装有 AllMusic 服务端插件时，服务端的 /music 命令树会覆盖客户端注册的同名指令，
-     * 导致 /music connect ... 被发往服务器并被拒绝（"你没有权限执行这个操作"）。
+     * 只做一件事——当独立服务端模式开启、且已连接到独立服务端，且玩家输入的是 {@code /music <其它子指令>}
+     * （既不是本模组的 {@code /musicconnect}，也不是 {@code /music} 树上已有的控制指令
+     * standalone / connect / disconnect / status / autoconnect / compat）时，把该指令转发给独立服务端。
+     * <p>
+     * 这样做是为了让服务端消息里可点击的 {@code /music select 1} 之类文本，在装了 AllMusic 插件
+     * 或已装 AllMusic 客户端 3.x 自带 {@code /music} 指令树的环境下，仍能正确转发到独立服务端。
+     * 本方法不做任何本地指令处理，因此不会再有状态门控导致的「指令失效」。
      *
-     * @param rawCommand 玩家输入的指令（可能带前导 '/'，由调用方保证非空）
-     * @return true 表示已在本地处理，不应再发送给 MC 服务器
+     * @param rawCommand 玩家输入的指令（可能带前导 '/'）
+     * @return true 表示已转发给独立服务端，不应再发送给 MC 服务器
      */
-    public static boolean handleLocal(String rawCommand) {
+    public static boolean forwardFallback(String rawCommand) {
         if (rawCommand == null) {
             return false;
         }
@@ -89,114 +93,20 @@ public class TcpBridge {
             return false;
         }
         String[] parts = command.split("\\s+");
-        if (!parts[0].equalsIgnoreCase("music")) {
+        if (!parts[0].equalsIgnoreCase("music") || parts.length < 2) {
             return false;
         }
-        if (parts.length < 2) {
-            // 只有 "/music"，交给原有逻辑
+        if (!INSTANCE.isStandaloneEnabled() || !INSTANCE.isConnected()) {
             return false;
         }
-        String sub = parts[1].toLowerCase(Locale.ROOT);
-        // 独立服务端模式开关始终由本模组处理：关闭后玩家仍能靠它重新开启
-        if (sub.equals("standalone")) {
-            if (parts.length >= 3 && parts[2].equalsIgnoreCase("true")) {
-                INSTANCE.setStandalone(true);
-            } else if (parts.length >= 3 && parts[2].equalsIgnoreCase("false")) {
-                INSTANCE.setStandalone(false);
-            } else if (parts.length >= 3) {
-                INSTANCE.sendMsg("用法：/music standalone [true|false]");
-            } else {
-                INSTANCE.sendMsg(INSTANCE.isStandaloneEnabled()
-                        ? "独立服务端模式：已开启（/music standalone false 关闭，关闭后由 MC 服务器上的 AllMusic 插件接管 /music 指令）"
-                        : "独立服务端模式：已关闭（/music standalone true 开启）");
-            }
-            return true;
-        }
-        // AllMusic 客户端版本兼容开关：同样始终本地处理（与独立服务端模式无关）
-        if (sub.equals("compat")) {
-            if (parts.length >= 3 && parts[2].equalsIgnoreCase("true")) {
-                INSTANCE.setClientCompat(Boolean.TRUE);
-            } else if (parts.length >= 3 && parts[2].equalsIgnoreCase("false")) {
-                INSTANCE.setClientCompat(Boolean.FALSE);
-            } else if (parts.length >= 3 && parts[2].equalsIgnoreCase("auto")) {
-                INSTANCE.setClientCompat(null);
-            } else if (parts.length >= 3) {
-                INSTANCE.sendMsg("用法：/music compat [true|false|auto]");
-            } else {
-                INSTANCE.printCompat();
-            }
-            return true;
-        }
-        if (!INSTANCE.isStandaloneEnabled()) {
-            // 关闭状态下：本模组自身的控制指令仍由本地处理——MC 服务器上的 AllMusic 插件没有这些指令，
-            // 交给它只会被当成点歌/搜索。其中 connect 会顺带重新开启独立服务端模式，方便随时回到独立服务端。
-            switch (sub) {
-                case "connect" -> INSTANCE.setStandalone(true);
-                case "disconnect" -> {
-                    INSTANCE.sendMsg("独立服务端模式已关闭：当前没有连接");
-                    return true;
-                }
-                case "status" -> {
-                    INSTANCE.sendMsg("独立服务端模式已关闭（用 /music standalone true 开启）：未连接到音乐服务器");
-                    return true;
-                }
-                case "autoconnect" -> {
-                    INSTANCE.sendMsg("独立服务端模式已关闭：自动连接不会生效，请先 /music standalone true");
-                    return true;
-                }
-                default -> {
-                    // 其余指令（play / stop / search / list 等）完全交给 MC 服务器（AllMusic 插件）
-                    return false;
-                }
-            }
-        }
-        switch (sub) {
-            case "connect" -> {
-                if (parts.length >= 3) {
-                    int port = DEFAULT_PORT;
-                    if (parts.length >= 4) {
-                        try {
-                            port = Integer.parseInt(parts[3]);
-                        } catch (NumberFormatException e) {
-                            INSTANCE.sendMsg("端口号无效：" + parts[3]);
-                            return true;
-                        }
-                        if (port < 1 || port > 65535) {
-                            INSTANCE.sendMsg("端口号超出范围：" + port);
-                            return true;
-                        }
-                    }
-                    INSTANCE.connect(parts[2], port);
-                } else {
-                    INSTANCE.sendMsg("用法：/music connect <ip> [端口]（端口默认 " + DEFAULT_PORT + "）");
-                }
-                return true;
-            }
-            case "disconnect" -> {
-                INSTANCE.disconnect();
-                return true;
-            }
-            case "status" -> {
-                INSTANCE.printStatus();
-                return true;
-            }
-            case "autoconnect" -> {
-                if (parts.length >= 3 && parts[2].equalsIgnoreCase("true")) {
-                    INSTANCE.setAutoConnect(true);
-                } else if (parts.length >= 3 && parts[2].equalsIgnoreCase("false")) {
-                    INSTANCE.setAutoConnect(false);
-                } else {
-                    INSTANCE.sendMsg("用法：/music autoconnect <true|false>");
-                }
-                return true;
+        switch (parts[1].toLowerCase(Locale.ROOT)) {
+            // 本模组 /music 树上已有的控制指令：由客户端指令树本地处理，不转发
+            case "standalone", "connect", "disconnect", "status", "autoconnect", "compat" -> {
+                return false;
             }
             default -> {
-                // 其它子指令：已连接音乐服务器时由其处理；否则放行，交给 MC 服务器（可能是服务端 AllMusic 插件）
-                if (INSTANCE.isConnected()) {
-                    INSTANCE.forwardCommand("/music " + command.substring(parts[0].length()).trim());
-                    return true;
-                }
-                return false;
+                INSTANCE.forwardCommand("/music " + command.substring(parts[0].length()).trim());
+                return true;
             }
         }
     }
@@ -220,6 +130,19 @@ public class TcpBridge {
         Thread thread = new Thread(() -> doConnect(ip, port), "allmusic-connect-" + ip + ":" + port);
         thread.setDaemon(true);
         thread.start();
+    }
+
+    /**
+     * 连接独立音乐服务端；若独立服务端模式处于关闭状态，先自动开启再连接。
+     * <p>
+     * 供 {@code /musicconnect connect} 使用——关闭模式下也能一键连回独立服务端，
+     * 不会出现「关闭后指令全部失效、无法再打开」的死锁。
+     */
+    public void connectAuto(String ip, int port) {
+        if (!isStandaloneEnabled()) {
+            setStandalone(true);
+        }
+        connect(ip, port);
     }
 
     private synchronized void doConnect(String ip, int port) {
@@ -299,6 +222,15 @@ public class TcpBridge {
      */
     public boolean isStandaloneEnabled() {
         return !Boolean.FALSE.equals(prefs.standalone);
+    }
+
+    /**
+     * 打印独立服务端模式当前状态（/musicconnect standalone 不带参数时）
+     */
+    public void printStandalone() {
+        sendMsg(isStandaloneEnabled()
+                ? "独立服务端模式：已开启（/music standalone false 关闭，关闭后由 MC 服务器上的 AllMusic 插件接管 /music 指令）"
+                : "独立服务端模式：已关闭（/music standalone true 开启）");
     }
 
     /**
